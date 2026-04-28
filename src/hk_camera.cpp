@@ -13,14 +13,6 @@ namespace hk_camera
 PLUGINLIB_EXPORT_CLASS(hk_camera::HKCameraNodelet, nodelet::Nodelet)
 HKCameraNodelet::HKCameraNodelet() = default;
 
-    inline void HKCameraNodelet::CHECK_MVS(int CODE) {
-    if (CODE != MV_OK) {
-      ROS_ERROR("[HK_CAMERA] API Fail: %d", CODE);
-      abort();
-    }
-  }
-
-
 void HKCameraNodelet::onInit()
 {
   nh_ = this->getPrivateNodeHandle();
