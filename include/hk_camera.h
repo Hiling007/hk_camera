@@ -46,6 +46,8 @@ private:
   void cameraStop(const std_msgs::Bool);
   void initializeCamera();
   bool changeStatusCB(rm_msgs::StatusChange::Request& change, rm_msgs::StatusChange::Response& res);
+
+  inline void CHECK_MVS(int CODE);
   ros::ServiceServer status_change_srv_;
 
   ros::NodeHandle nh_;
