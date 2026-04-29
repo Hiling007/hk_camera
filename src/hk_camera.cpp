@@ -125,7 +125,10 @@ void HKCameraNodelet::initializeCamera()
     exit(-1);
   }
   //  assert(MV_CC_EnumDevices(MV_GIGE_DEVICE | MV_USB_DEVICE, &stDeviceList) == MV_OK);
-  assert(stDeviceList.nDeviceNum > 0);
+  if (stDeviceList.nDeviceNum <= 0) {
+    ROS_ERROR("stDeviceList.nDeviceNum <= 0!");
+    throw std::runtime_error("stDeviceList.nDeviceNum <= 0");
+  }
 
   // Opens the device.
   unsigned int nIndex = 0;

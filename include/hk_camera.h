@@ -59,7 +59,6 @@ private:
   bool changeStatusCB(rm_msgs::StatusChange::Request& change, rm_msgs::StatusChange::Response& res);
 
   ros::ServiceServer status_change_srv_;
-  ros::ServiceServer status_change_srv_;
 
   ros::NodeHandle nh_;
   static void* dev_handle_;
