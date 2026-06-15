@@ -20,6 +20,17 @@
 #include <rm_msgs/StatusChange.h>
 #include <std_msgs/Bool.h>
 
+// MVS SDK error checking macro
+#define CHECK_MVS(func) \
+  do { \
+    int _ret = (func); \
+    if (_ret != MV_OK) { \
+      ROS_ERROR("%s FAILED at :%d! Error code: 0x%08x", \
+                #func, __LINE__, _ret); \
+      throw std::runtime_error(#func); \
+    } \
+  } while(0)
+
 namespace hk_camera
 {
 struct TriggerPacket
@@ -46,6 +57,7 @@ private:
   void cameraStop(const std_msgs::Bool);
   void initializeCamera();
   bool changeStatusCB(rm_msgs::StatusChange::Request& change, rm_msgs::StatusChange::Response& res);
+
   ros::ServiceServer status_change_srv_;
 
   ros::NodeHandle nh_;
