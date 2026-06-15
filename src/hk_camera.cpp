@@ -20,7 +20,7 @@ void HKCameraNodelet::onInit()
   image_transport::ImageTransport it(nh_);
   pub_ = it.advertiseCamera("image_raw", 1);
   d_pub_ = it.advertise("image_raw_down", 1);
-  this->status_change_srv_ = nh_.advertiseService("/exposure_status_switch", &HKCameraNodelet::changeStatusCB, this);
+  this->status_change_srv_ = nh_.advertiseService("exposure_status_switch", &HKCameraNodelet::changeStatusCB, this);
 
   nh_.param("camera_frame_id", image_.header.frame_id, std::string("camera_optical_frame"));
   nh_.param("camera_name", camera_name_, std::string("camera"));
