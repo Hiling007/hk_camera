@@ -75,7 +75,7 @@ void HKCameraNodelet::onInit()
   image_.data.resize(image_.height * image_.step);
   image_.encoding = pixel_format_;
   img_ = new unsigned char[image_.height * image_.step];
-
+  ROS_INFO("OnINit initializeCamera");
   initializeCamera();
 
   ros::NodeHandle p_nh(nh_, "hk_camera_reconfig");
@@ -104,13 +104,14 @@ void HKCameraNodelet::onInit()
   camera_change_sub = nh_.subscribe("/camera_name", 50, &hk_camera::HKCameraNodelet::cameraChange, this);
   camera_stop_sub_ = nh_.subscribe("/camera_stop", 50, &hk_camera::HKCameraNodelet::cameraStop, this);
 
-  timer_ = nh_.createTimer(ros::Duration(0.1), &HKCameraNodelet::timerCallback, this);
+  timer_ = nh_.createTimer(ros::Duration(0.5), &HKCameraNodelet::timerCallback, this);
   ROS_INFO("Camera %s is ready", camera_name_.c_str());
 
 }
 
 void HKCameraNodelet::initializeCamera()
 {
+  ROS_WARN("start initializeCamera");
   MV_CC_DEVICE_INFO_LIST stDeviceList;
   memset(&stDeviceList, 0, sizeof(MV_CC_DEVICE_INFO_LIST));
   try
@@ -137,20 +138,33 @@ void HKCameraNodelet::initializeCamera()
   ros::Duration(sleep_time_).sleep();
   if (stDeviceList.nDeviceNum > 1)
   {
+    if (camera_sn_.empty())
+    {
+      ROS_ERROR("Multiple cameras found, but camera_sn is empty.");
+      throw std::runtime_error("camera_sn is required when multiple cameras are connected");
+    }
     for (; nIndex < stDeviceList.nDeviceNum; nIndex++)
     {
+      ROS_WARN("creating handle");
       CHECK_MVS(MV_CC_CreateHandle(&dev_handle_, stDeviceList.pDeviceInfo[nIndex]));
       MV_CC_OpenDevice(dev_handle_);
       MV_CC_GetStringValue(dev_handle_, "DeviceSerialNumber", &dev_sn);
       if (strcmp(dev_sn.chCurValue, (char*)camera_sn_.data()) == 0)
       {
+        ROS_WARN("find target!");
         break;
       }
       else
       {
         MV_CC_DestroyHandle(dev_handle_);
+        ROS_WARN("wrong target");
+
+        //If all device not match, drop.
         if (nIndex == stDeviceList.nDeviceNum - 1)
-          ROS_INFO("The serial number is false!");
+        {
+          ROS_ERROR("Serial number not match!");
+          throw std::runtime_error("Serial number not match!");
+        }
       }
     }
   }
@@ -158,11 +172,30 @@ void HKCameraNodelet::initializeCamera()
   {
     CHECK_MVS(MV_CC_CreateHandle(&dev_handle_, stDeviceList.pDeviceInfo[nIndex]));
     CHECK_MVS(MV_CC_OpenDevice(dev_handle_));
-    MV_CC_GetStringValue(dev_handle_, "DeviceSerialNumber", &dev_sn);
+    CHECK_MVS(MV_CC_GetStringValue(dev_handle_, "DeviceSerialNumber", &dev_sn));
+    if (dev_sn.chCurValue[0] == '\0')
+    {
+      ROS_ERROR("Device serial number is null.");
+      throw std::runtime_error("Device serial number is null");
+    }
+
+    //If first init and only one device, use device_sn instead of camera_sn in the yaml
+    if (!is_sn_init)
+      camera_sn_ = std::string(dev_sn.chCurValue);
   }
+  //Camera_sn first init complete, won't change camera_sn_ any more
+  is_sn_init = true;
+
+  // if (!dev_sn.chCurValue)
+  // {
+  //   ROS_ERROR("No camera found, check physical connection.");
+  //   throw std::runtime_error("No camera found");
+
+  // }
 
   // Print the camera serial number
   ROS_INFO("Camera Serial Number: %s", dev_sn.chCurValue);
+
 
   // Retrieve and print the camera's model name using DeviceModelName
   MVCC_STRINGVALUE model_name;
@@ -172,6 +205,7 @@ void HKCameraNodelet::initializeCamera()
   {
     ROS_INFO("Camera Model: %s", model_name.chCurValue);
   }
+
   else
   {
     ROS_WARN("Failed to get camera model name. Error code: %x", nRet);
@@ -241,13 +275,35 @@ void HKCameraNodelet::timerCallback(const ros::TimerEvent&) {
     std::cout << "MV_CC_EnumDevices fail! nRet " << std::hex << nRet << std::endl;
     exit(-1);
   }
-  if (stDeviceList.nDeviceNum == 0)
-    camera_restart_flag_ = true;
-  if (camera_restart_flag_ && stDeviceList.nDeviceNum > 0)
-  {
-    initializeCamera();
-    camera_restart_flag_ = false;
+
+  // if () {
+  //   ROS_WARN("set camera_restart_flag_ true!");
+  //   camera_restart_flag_ = true;
+  // }
+  if (dev_handle_ && !MV_CC_IsDeviceConnected(dev_handle_)) {
+    std::cout<<"searching target:"<<camera_sn_<<std::endl;
+    for (unsigned int i = 0;i< stDeviceList.nDeviceNum; i++)
+    {
+      ROS_INFO("device:%d\n",stDeviceList.nDeviceNum);
+      if (stDeviceList.pDeviceInfo[i] == nullptr) {
+        ROS_INFO("no device.");
+        break;
+      }
+      const char* sn = reinterpret_cast<const char*>(
+        stDeviceList.pDeviceInfo[i]->SpecialInfo.stUsb3VInfo.chSerialNumber);
+
+      // if device_sn and camera_sn_ not the same, reject
+      if (strcmp(sn, camera_sn_.c_str()) == 0)
+      {
+        dev_handle_ = nullptr;
+
+        initializeCamera();
+        // camera_restart_flag_ = false;
+        break;
+      }
+    }
   }
+
 }
 
 bool HKCameraNodelet::changeStatusCB(rm_msgs::StatusChange::Request& change, rm_msgs::StatusChange::Response& res)

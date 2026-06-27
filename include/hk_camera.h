@@ -72,6 +72,7 @@ private:
   std::string camera_info_url_, pixel_format_, frame_id_, camera_sn_;
   double frame_rate_;
   int image_width_{}, image_height_{}, image_offset_x_{}, image_offset_y_{}, sleep_time_{};
+  bool is_sn_init{};
   double gain_value_{};
   int gamma_selector_{};
   double gamma_value_{};
