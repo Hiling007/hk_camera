@@ -55,6 +55,7 @@ private:
   void enableTriggerCB(const ros::TimerEvent&);
   void cameraChange(const std_msgs::String);
   void cameraStop(const std_msgs::Bool);
+  void reset();
   void initializeCamera();
   bool changeStatusCB(rm_msgs::StatusChange::Request& change, rm_msgs::StatusChange::Response& res);
 
@@ -117,6 +118,7 @@ private:
   ros::WallTime next_pub_time_;
   bool is_fps_down_{};
   std::mutex fps_down_mutex_;
+  CameraConfig latest_config_;
 
   std::string node_name_;
 };

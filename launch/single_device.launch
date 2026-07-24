@@ -1,7 +1,7 @@
 <launch>
     <arg name="enable_imu_trigger" default="false"/>
     <node pkg="nodelet" type="nodelet" name="vision_nodelet" args="manager"
-          output="screen"/>
+          output="screen" respawn="true"/>
     <node pkg="nodelet" type="nodelet" name="hk_camera"
           args="load hk_camera/HKCameraNodelet vision_nodelet"
           output="screen" respawn="true">
