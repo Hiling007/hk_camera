@@ -104,9 +104,27 @@ void HKCameraNodelet::onInit()
   camera_change_sub = nh_.subscribe("/camera_name", 50, &hk_camera::HKCameraNodelet::cameraChange, this);
   camera_stop_sub_ = nh_.subscribe("/camera_stop", 50, &hk_camera::HKCameraNodelet::cameraStop, this);
 
-  timer_ = nh_.createTimer(ros::Duration(0.5), &HKCameraNodelet::timerCallback, this);
+  timer_ = nh_.createTimer(ros::Duration(2), &HKCameraNodelet::timerCallback, this);
   ROS_INFO("Camera %s is ready", camera_name_.c_str());
 
+}
+
+//重置相机取流参数
+void HKCameraNodelet::reset()
+{
+  camera_restart_flag_ = false;
+  trigger_not_sync_ = false;
+  receive_trigger_counter_ = 0;
+  fifo_front_ = 0;
+  fifo_rear_ = 0;
+  take_photo_ = false;
+
+  {
+    std::lock_guard<std::mutex> lock(fps_down_mutex_);
+    next_pub_time_ = ros::WallTime();
+  }
+
+  // reapply_config_after_init_ = has_latest_config_;
 }
 
 void HKCameraNodelet::initializeCamera()
@@ -145,19 +163,19 @@ void HKCameraNodelet::initializeCamera()
     }
     for (; nIndex < stDeviceList.nDeviceNum; nIndex++)
     {
-      ROS_WARN("creating handle");
+      // ROS_WARN("creating handle");
       CHECK_MVS(MV_CC_CreateHandle(&dev_handle_, stDeviceList.pDeviceInfo[nIndex]));
       MV_CC_OpenDevice(dev_handle_);
       MV_CC_GetStringValue(dev_handle_, "DeviceSerialNumber", &dev_sn);
       if (strcmp(dev_sn.chCurValue, (char*)camera_sn_.data()) == 0)
       {
-        ROS_WARN("find target!");
+        ROS_WARN("find target: %s", dev_sn.chCurValue);
         break;
       }
       else
       {
         MV_CC_DestroyHandle(dev_handle_);
-        ROS_WARN("wrong target");
+        ROS_WARN("wrong target: %s", dev_sn.chCurValue);
 
         //If all device not match, drop.
         if (nIndex == stDeviceList.nDeviceNum - 1)
@@ -279,7 +297,7 @@ void HKCameraNodelet::timerCallback(const ros::TimerEvent&) {
   // if () {
   //   ROS_WARN("set camera_restart_flag_ true!");
   //   camera_restart_flag_ = true;
-  // } 
+  // }
   if (dev_handle_ && !MV_CC_IsDeviceConnected(dev_handle_)) {
     std::cout<<"searching target:"<<camera_sn_<<std::endl;
     for (unsigned int i = 0;i< stDeviceList.nDeviceNum; i++)
@@ -297,8 +315,10 @@ void HKCameraNodelet::timerCallback(const ros::TimerEvent&) {
       {
         dev_handle_ = nullptr;
 
+        reset();
         initializeCamera();
-        // camera_restart_flag_ = false;
+        CameraConfig config = latest_config_;
+        reconfigCB(config, 0);
         break;
       }
     }
@@ -516,6 +536,7 @@ void HKCameraNodelet::onFrameCB(unsigned char* pData, MV_FRAME_OUT_INFO_EX* pFra
 
 void HKCameraNodelet::reconfigCB(CameraConfig& config, uint32_t level)
 {
+  ROS_WARN("Reconfigure.");
   (void)level;
 
   // Launch setting
@@ -536,6 +557,8 @@ void HKCameraNodelet::reconfigCB(CameraConfig& config, uint32_t level)
     config.target_fps = target_fps_;
     initialize_flag_ = false;
   }
+
+  latest_config_ = config;
 
   // Switch camera
   if (!config.stop_grab)
@@ -635,8 +658,10 @@ void HKCameraNodelet::reconfigCB(CameraConfig& config, uint32_t level)
   take_photo_ = config.take_photo;
   is_fps_down_ = config.is_fps_down;
   target_fps_ = std::max(config.target_fps, 1.0);
-  std::lock_guard<std::mutex> lock(fps_down_mutex_);
-  next_pub_time_ = ros::WallTime();
+  {
+    std::lock_guard<std::mutex> lock(fps_down_mutex_);
+    next_pub_time_ = ros::WallTime();
+  }
   //  Width offset of image
   //  width_ = config.width_offset;
 }
