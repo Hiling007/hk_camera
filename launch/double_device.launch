@@ -2,10 +2,10 @@
 <launch>
     <arg name="enable_imu_trigger" default="false"/>
     <node pkg="nodelet" type="nodelet" name="vision_nodelet" args="manager"
-          output="screen" respawn="true"/>
+          output="screen" respawn="true" respawn_delay="3"/>
     <node pkg="nodelet" type="nodelet" name="hk_camera"
           args="load hk_camera/HKCameraNodelet vision_nodelet"
-          output="screen" respawn="true">
+          output="screen" respawn="true" respawn_delay="3">
         <param name="camera_name" value="hk_camera"/>
         <param name="image_width" value="1440"/>
         <param name="image_height" value="1080"/>
@@ -31,10 +31,10 @@
 
     </node>
     <node pkg="nodelet" type="nodelet" name="vision_nodelet_back" args="manager"
-          output="screen" respawn="true"/>
+          output="screen" respawn="true" respawn_delay="3"/>
     <node pkg="nodelet" type="nodelet" name="hk_camera_back"
           args="load hk_camera/HKCameraNodelet vision_nodelet_back"
-          output="screen" respawn="true">
+          output="screen" respawn="true" respawn_delay="3">
         <param name="camera_name" value="hk_camera_back"/>
         <param name="image_width" value="1280"/>
         <param name="image_height" value="1024"/>

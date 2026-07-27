@@ -1,0 +1,63 @@
+<launch>
+    <!--
+      Destructive test fixture: both camera nodelets intentionally share one
+      manager so process-wide static camera resources overwrite each other.
+    -->
+    <arg name="camera_a_sn"/>
+    <arg name="camera_b_sn"/>
+
+    <arg name="camera_a_width" default="1440"/>
+    <arg name="camera_a_height" default="1080"/>
+    <arg name="camera_a_frame_rate" default="200.0"/>
+    <arg name="camera_b_width" default="1280"/>
+    <arg name="camera_b_height" default="1024"/>
+    <arg name="camera_b_frame_rate" default="30.0"/>
+
+    <!-- Enable only when exercising unload/reload behavior. -->
+    <arg name="respawn_camera_b" default="false"/>
+    <arg name="respawn_delay" default="2.0"/>
+
+    <node pkg="nodelet" type="nodelet" name="hk_camera_static_test_manager"
+          args="manager" output="screen"/>
+
+    <node pkg="nodelet" type="nodelet" name="hk_camera_static_test_a"
+          args="load hk_camera/HKCameraNodelet hk_camera_static_test_manager"
+          output="screen">
+        <param name="camera_name" value="hk_camera_static_test_a"/>
+        <param name="camera_sn" value="DA5510091"/>
+        <param name="image_width" value="$(arg camera_a_width)"/>
+        <param name="image_height" value="$(arg camera_a_height)"/>
+        <param name="image_offset_x" value="0"/>
+        <param name="image_offset_y" value="0"/>
+        <param name="frame_rate" value="$(arg camera_a_frame_rate)"/>
+        <param name="pixel_format" value="bgr8"/>
+        <param name="camera_frame_id" value="hk_camera_static_test_a_optical_frame"/>
+        <param name="frame_id" value="hk_camera_static_test_a_optical_frame"/>
+        <param name="camera_info_url" value=""/>
+        <param name="enable_imu_trigger" value="false"/>
+        <param name="enable_resolution" value="false"/>
+        <param name="stop_grab" value="false"/>
+        <param name="is_fps_down" value="false"/>
+    </node>
+
+    <node pkg="nodelet" type="nodelet" name="hk_camera_static_test_b"
+          args="load hk_camera/HKCameraNodelet hk_camera_static_test_manager"
+          output="screen" respawn="$(arg respawn_camera_b)"
+          respawn_delay="$(arg respawn_delay)">
+        <param name="camera_name" value="hk_camera_static_test_b"/>
+        <param name="camera_sn" value="00J88247797"/>
+        <param name="image_width" value="$(arg camera_b_width)"/>
+        <param name="image_height" value="$(arg camera_b_height)"/>
+        <param name="image_offset_x" value="0"/>
+        <param name="image_offset_y" value="0"/>
+        <param name="frame_rate" value="$(arg camera_b_frame_rate)"/>
+        <param name="pixel_format" value="bgr8"/>
+        <param name="camera_frame_id" value="hk_camera_static_test_b_optical_frame"/>
+        <param name="frame_id" value="hk_camera_static_test_b_optical_frame"/>
+        <param name="camera_info_url" value=""/>
+        <param name="enable_imu_trigger" value="false"/>
+        <param name="enable_resolution" value="false"/>
+        <param name="stop_grab" value="false"/>
+        <param name="is_fps_down" value="false"/>
+    </node>
+</launch>
