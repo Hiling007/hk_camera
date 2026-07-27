@@ -132,16 +132,11 @@ void HKCameraNodelet::initializeCamera()
   ROS_WARN("start initializeCamera");
   MV_CC_DEVICE_INFO_LIST stDeviceList;
   memset(&stDeviceList, 0, sizeof(MV_CC_DEVICE_INFO_LIST));
-  try
+  const int enum_ret = MV_CC_EnumDevices(MV_GIGE_DEVICE | MV_USB_DEVICE, &stDeviceList);
+  if (enum_ret != MV_OK)
   {
-    int nRet = MV_CC_EnumDevices(MV_GIGE_DEVICE | MV_USB_DEVICE, &stDeviceList);
-    if (nRet != MV_OK)
-      throw(nRet);
-  }
-  catch (int nRet)
-  {
-    std::cout << "MV_CC_EnumDevices fail! nRet " << std::hex << nRet << std::endl;
-    exit(-1);
+    ROS_ERROR("MV_CC_EnumDevices failed during camera initialization. Error code: 0x%08x", enum_ret);
+    throw std::runtime_error("MV_CC_EnumDevices failed during camera initialization");
   }
   //  assert(MV_CC_EnumDevices(MV_GIGE_DEVICE | MV_USB_DEVICE, &stDeviceList) == MV_OK);
   if (stDeviceList.nDeviceNum <= 0) {
@@ -282,16 +277,11 @@ void HKCameraNodelet::initializeCamera()
 void HKCameraNodelet::timerCallback(const ros::TimerEvent&) {
   MV_CC_DEVICE_INFO_LIST stDeviceList;
   memset(&stDeviceList, 0, sizeof(MV_CC_DEVICE_INFO_LIST));
-  try
+  const int enum_ret = MV_CC_EnumDevices(MV_GIGE_DEVICE | MV_USB_DEVICE, &stDeviceList);
+  if (enum_ret != MV_OK)
   {
-    int nRet = MV_CC_EnumDevices(MV_GIGE_DEVICE | MV_USB_DEVICE, &stDeviceList);
-    if (nRet != MV_OK)
-      throw(nRet);
-  }
-  catch (int nRet)
-  {
-    std::cout << "MV_CC_EnumDevices fail! nRet " << std::hex << nRet << std::endl;
-    exit(-1);
+    ROS_ERROR_THROTTLE(5.0, "MV_CC_EnumDevices failed during connection check. Error code: 0x%08x", enum_ret);
+    return;
   }
 
   // if () {
