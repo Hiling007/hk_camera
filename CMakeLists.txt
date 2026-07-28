@@ -46,6 +46,13 @@ target_link_libraries(hk_camera
 
 add_dependencies(hk_camera ${PROJECT_NAME}_gencfg)
 
+if(CATKIN_ENABLE_TESTING)
+    catkin_add_gtest(
+            hk_camera_enum_failure_policy_test
+            test/test_enum_failure_policy.cpp
+    )
+endif()
+
 #add_executable(hk_camera_node
 #        src/hk_camera_node.cpp)
 #add_dependencies(hk_camera_node ${PROJECT_NAME}_gencfg)

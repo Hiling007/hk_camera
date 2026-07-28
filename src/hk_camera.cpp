@@ -3,6 +3,7 @@
 //
 #include <pluginlib/class_list_macros.h>
 #include <hk_camera.h>
+#include <hk_camera/enum_failure_policy.h>
 #include <utility>
 #include <opencv2/opencv.hpp>
 #include <cv_bridge/cv_bridge.h>
@@ -133,10 +134,10 @@ void HKCameraNodelet::initializeCamera()
   MV_CC_DEVICE_INFO_LIST stDeviceList;
   memset(&stDeviceList, 0, sizeof(MV_CC_DEVICE_INFO_LIST));
   const int enum_ret = MV_CC_EnumDevices(MV_GIGE_DEVICE | MV_USB_DEVICE, &stDeviceList);
-  if (enum_ret != MV_OK)
+  if (!canContinueAfterDeviceEnumeration(enum_ret))
   {
     ROS_ERROR("MV_CC_EnumDevices failed during camera initialization. Error code: 0x%08x", enum_ret);
-    throw std::runtime_error("MV_CC_EnumDevices failed during camera initialization");
+    throwOnDeviceEnumerationFailure(enum_ret);
   }
   //  assert(MV_CC_EnumDevices(MV_GIGE_DEVICE | MV_USB_DEVICE, &stDeviceList) == MV_OK);
   if (stDeviceList.nDeviceNum <= 0) {
@@ -278,10 +279,10 @@ void HKCameraNodelet::timerCallback(const ros::TimerEvent&) {
   MV_CC_DEVICE_INFO_LIST stDeviceList;
   memset(&stDeviceList, 0, sizeof(MV_CC_DEVICE_INFO_LIST));
   const int enum_ret = MV_CC_EnumDevices(MV_GIGE_DEVICE | MV_USB_DEVICE, &stDeviceList);
-  if (enum_ret != MV_OK)
+  if (!canContinueAfterDeviceEnumeration(enum_ret))
   {
     ROS_ERROR_THROTTLE(5.0, "MV_CC_EnumDevices failed during connection check. Error code: 0x%08x", enum_ret);
-    return;
+    throwOnDeviceEnumerationFailure(enum_ret);
   }
 
   // if () {
