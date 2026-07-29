@@ -659,8 +659,40 @@ void HKCameraNodelet::reconfigCB(CameraConfig& config, uint32_t level)
 
 HKCameraNodelet::~HKCameraNodelet()
 {
-  MV_CC_StopGrabbing(dev_handle_);
-  MV_CC_DestroyHandle(dev_handle_);
+  enable_trigger_timer_.stop();
+  timer_.stop();
+  trigger_sub_.shutdown();
+  camera_change_sub.shutdown();
+  camera_stop_sub_.shutdown();
+  status_change_srv_.shutdown();
+
+  delete srv_;
+  srv_ = nullptr;
+
+  if (enable_imu_trigger_ && imu_trigger_client_.isValid())
+  {
+    rm_msgs::EnableImuTrigger imu_trigger_srv;
+    imu_trigger_srv.request.imu_name = imu_name_;
+    imu_trigger_srv.request.enable_trigger = false;
+    imu_trigger_client_.call(imu_trigger_srv);
+  }
+
+  if (dev_handle_)
+  {
+    const int stop_result = MV_CC_StopGrabbing(dev_handle_);
+    if (stop_result != MV_OK)
+      ROS_WARN("MV_CC_StopGrabbing during shutdown returned 0x%08x", stop_result);
+    const int close_result = MV_CC_CloseDevice(dev_handle_);
+    if (close_result != MV_OK)
+      ROS_WARN("MV_CC_CloseDevice during shutdown returned 0x%08x", close_result);
+    const int destroy_result = MV_CC_DestroyHandle(dev_handle_);
+    if (destroy_result != MV_OK)
+      ROS_WARN("MV_CC_DestroyHandle during shutdown returned 0x%08x", destroy_result);
+    dev_handle_ = nullptr;
+  }
+
+  delete[] img_;
+  img_ = nullptr;
 }
 
 void* HKCameraNodelet::dev_handle_;
