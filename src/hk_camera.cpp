@@ -3,6 +3,7 @@
 //
 #include <pluginlib/class_list_macros.h>
 #include <hk_camera.h>
+#include <hk_camera/camera_release_policy.h>
 #include <hk_camera/enum_failure_policy.h>
 #include <utility>
 #include <opencv2/opencv.hpp>
@@ -13,6 +14,30 @@ namespace hk_camera
 {
 PLUGINLIB_EXPORT_CLASS(hk_camera::HKCameraNodelet, nodelet::Nodelet)
 HKCameraNodelet::HKCameraNodelet() = default;
+
+HKCameraNodelet::FrameCallbackGuard::FrameCallbackGuard(HKCameraNodelet* camera) : camera_(camera) {}
+
+HKCameraNodelet::FrameCallbackGuard::~FrameCallbackGuard()
+{
+  camera_->endFrameCallback();
+}
+
+bool HKCameraNodelet::beginFrameCallback()
+{
+  std::lock_guard<std::mutex> lock(frame_callback_mutex_);
+  if (!accept_frame_callbacks_)
+    return false;
+  ++active_frame_callbacks_;
+  return true;
+}
+
+void HKCameraNodelet::endFrameCallback() noexcept
+{
+  std::lock_guard<std::mutex> lock(frame_callback_mutex_);
+  --active_frame_callbacks_;
+  if (active_frame_callbacks_ == 0)
+    frame_callback_cv_.notify_all();
+}
 
 void HKCameraNodelet::onInit()
 {
@@ -171,6 +196,7 @@ void HKCameraNodelet::initializeCamera()
       else
       {
         MV_CC_DestroyHandle(dev_handle_);
+        dev_handle_ = nullptr;
         ROS_WARN("wrong target: %s", dev_sn.chCurValue);
 
         //If all device not match, drop.
@@ -267,12 +293,23 @@ void HKCameraNodelet::initializeCamera()
   {
     CHECK_MVS(MV_CC_SetEnumValue(dev_handle_, "TriggerMode", 0));
   }
-  MV_CC_RegisterImageCallBackEx(dev_handle_, onFrameCB, this);
-
-  if (MV_CC_StartGrabbing(dev_handle_) == MV_OK)
+  CHECK_MVS(MV_CC_RegisterImageCallBackEx(dev_handle_, onFrameCB, this));
   {
-    ROS_INFO("Stream On.");
+    std::lock_guard<std::mutex> lock(frame_callback_mutex_);
+    accept_frame_callbacks_ = true;
   }
+
+  const int start_result = MV_CC_StartGrabbing(dev_handle_);
+  if (start_result != MV_OK)
+  {
+    {
+      std::lock_guard<std::mutex> lock(frame_callback_mutex_);
+      accept_frame_callbacks_ = false;
+    }
+    ROS_ERROR("MV_CC_StartGrabbing failed. Error code: 0x%08x", start_result);
+    throw std::runtime_error("MV_CC_StartGrabbing failed");
+  }
+  ROS_INFO("Stream On.");
 }
 
 void HKCameraNodelet::timerCallback(const ros::TimerEvent&) {
@@ -291,6 +328,10 @@ void HKCameraNodelet::timerCallback(const ros::TimerEvent&) {
   // }
   if (dev_handle_ && !MV_CC_IsDeviceConnected(dev_handle_)) {
     std::cout<<"searching target:"<<camera_sn_<<std::endl;
+    releaseCameraHandle();
+  }
+
+  if (!dev_handle_) {
     for (unsigned int i = 0;i< stDeviceList.nDeviceNum; i++)
     {
       ROS_INFO("device:%d\n",stDeviceList.nDeviceNum);
@@ -304,8 +345,6 @@ void HKCameraNodelet::timerCallback(const ros::TimerEvent&) {
       // if device_sn and camera_sn_ not the same, reject
       if (strcmp(sn, camera_sn_.c_str()) == 0)
       {
-        dev_handle_ = nullptr;
-
         reset();
         initializeCamera();
         CameraConfig config = latest_config_;
@@ -391,6 +430,10 @@ bool HKCameraNodelet::fifoRead(TriggerPacket& pkt)
 void HKCameraNodelet::onFrameCB(unsigned char* pData, MV_FRAME_OUT_INFO_EX* pFrameInfo, void* pUser)
 {
   auto* self = static_cast<HKCameraNodelet*>(pUser);
+  if (!self || !self->beginFrameCallback())
+    return;
+  FrameCallbackGuard callback_guard(self);
+
   if (pFrameInfo)
   {
     ros::Time now = ros::Time::now();
@@ -421,8 +464,8 @@ void HKCameraNodelet::onFrameCB(unsigned char* pData, MV_FRAME_OUT_INFO_EX* pFra
         }
         else
         {
-          image_.header.stamp = pkt.trigger_time_;
-          info_.header.stamp = pkt.trigger_time_;
+          self->image_.header.stamp = pkt.trigger_time_;
+          self->info_.header.stamp = pkt.trigger_time_;
         }
       }
       if (trigger_not_sync_)
@@ -440,8 +483,8 @@ void HKCameraNodelet::onFrameCB(unsigned char* pData, MV_FRAME_OUT_INFO_EX* pFra
     else
     {
       ros::Time now = ros::Time::now();
-      image_.header.stamp = now;
-      info_.header.stamp = now;
+      self->image_.header.stamp = now;
+      self->info_.header.stamp = now;
     }
 
     MV_CC_PIXEL_CONVERT_PARAM stConvertParam = { 0 };
@@ -453,10 +496,10 @@ void HKCameraNodelet::onFrameCB(unsigned char* pData, MV_FRAME_OUT_INFO_EX* pFra
     stConvertParam.nSrcDataLen = pFrameInfo->nFrameLen;
     stConvertParam.enSrcPixelType = pFrameInfo->enPixelType;
     stConvertParam.enDstPixelType = PixelType_Gvsp_BGR8_Packed;
-    stConvertParam.pDstBuffer = img_;
+    stConvertParam.pDstBuffer = self->img_;
     stConvertParam.nDstBufferSize = pFrameInfo->nWidth * pFrameInfo->nHeight * 3;
-    MV_CC_ConvertPixelType(dev_handle_, &stConvertParam);
-    memcpy((char*)(&image_.data[0]), img_, image_.step * image_.height);
+    MV_CC_ConvertPixelType(self->dev_handle_, &stConvertParam);
+    memcpy((char*)(&self->image_.data[0]), self->img_, self->image_.step * self->image_.height);
 
     //      if(take_photo_)
     //      {
@@ -471,17 +514,17 @@ void HKCameraNodelet::onFrameCB(unsigned char* pData, MV_FRAME_OUT_INFO_EX* pFra
     //          count_++;
     //      }
 
-    if (enable_resolution_)
+    if (self->enable_resolution_)
     {
       cv_bridge::CvImagePtr cv_ptr;
-      cv_ptr = cv_bridge::toCvCopy(image_, "bgr8");
+      cv_ptr = cv_bridge::toCvCopy(self->image_, "bgr8");
       cv::Mat cv_img;
       cv_ptr->image.copyTo(cv_img);
       sensor_msgs::ImagePtr image_rect_ptr;
 
-      cv::resize(cv_img, cv_img, cvSize(resolution_ratio_width_, resolution_ratio_height_));
+      cv::resize(cv_img, cv_img, cvSize(self->resolution_ratio_width_, self->resolution_ratio_height_));
       image_rect_ptr = cv_bridge::CvImage(std_msgs::Header(), "bgr8", cv_img).toImageMsg();
-      pub_rect_.publish(image_rect_ptr);
+      self->pub_rect_.publish(image_rect_ptr);
 
       //    if (strcmp(camera_name_.data(), "hk_right"))
       //    {
@@ -498,7 +541,7 @@ void HKCameraNodelet::onFrameCB(unsigned char* pData, MV_FRAME_OUT_INFO_EX* pFra
       //      pub_rect_.publish(image_rect_ptr);
       //    }
     }
-    pub_.publish(image_, info_);
+    self->pub_.publish(self->image_, self->info_);
 
     bool publish_downsampled = false;
     if (self->is_fps_down_)
@@ -519,7 +562,7 @@ void HKCameraNodelet::onFrameCB(unsigned char* pData, MV_FRAME_OUT_INFO_EX* pFra
       }
     }
     if (publish_downsampled)
-      self->d_pub_.publish(image_);
+      self->d_pub_.publish(self->image_);
   }
   else
     ROS_ERROR("Grab image failed!");
@@ -657,6 +700,88 @@ void HKCameraNodelet::reconfigCB(CameraConfig& config, uint32_t level)
   //  width_ = config.width_offset;
 }
 
+void HKCameraNodelet::releaseCameraHandle() noexcept
+{
+  const ros::WallTime release_start = ros::WallTime::now();
+  {
+    std::lock_guard<std::mutex> lock(frame_callback_mutex_);
+    accept_frame_callbacks_ = false;
+  }
+
+  void* handle = dev_handle_;
+  bool device_connected = false;
+  double connection_check_seconds = 0.0;
+  double stop_seconds = 0.0;
+  CameraReleasePolicy policy{false, false};
+  if (handle)
+  {
+    const ros::WallTime connection_check_start = ros::WallTime::now();
+    device_connected = MV_CC_IsDeviceConnected(handle);
+    connection_check_seconds = (ros::WallTime::now() - connection_check_start).toSec();
+    policy = cameraReleasePolicy(device_connected);
+
+    if (policy.stop_grabbing)
+    {
+      const ros::WallTime stop_start = ros::WallTime::now();
+      const int stop_result = MV_CC_StopGrabbing(handle);
+      stop_seconds = (ros::WallTime::now() - stop_start).toSec();
+      if (stop_result != MV_OK)
+      {
+        ROS_WARN("MV_CC_StopGrabbing during release returned 0x%08x",
+                 static_cast<unsigned int>(stop_result));
+      }
+    }
+    else
+    {
+      ROS_WARN("Camera handle is disconnected; skipping MV_CC_StopGrabbing and MV_CC_CloseDevice before destroy");
+    }
+  }
+
+  const ros::WallTime callback_wait_start = ros::WallTime::now();
+  {
+    std::unique_lock<std::mutex> lock(frame_callback_mutex_);
+    frame_callback_cv_.wait(lock, [this]() { return active_frame_callbacks_ == 0; });
+  }
+  const double callback_wait_seconds = (ros::WallTime::now() - callback_wait_start).toSec();
+
+  if (!handle)
+    return;
+
+  double close_seconds = 0.0;
+  if (policy.close_device)
+  {
+    const ros::WallTime close_start = ros::WallTime::now();
+    const int close_result = MV_CC_CloseDevice(handle);
+    close_seconds = (ros::WallTime::now() - close_start).toSec();
+    if (close_result != MV_OK)
+    {
+      ROS_WARN("MV_CC_CloseDevice during release returned 0x%08x",
+               static_cast<unsigned int>(close_result));
+    }
+  }
+
+  const ros::WallTime destroy_start = ros::WallTime::now();
+  const int destroy_result = MV_CC_DestroyHandle(handle);
+  const double destroy_seconds = (ros::WallTime::now() - destroy_start).toSec();
+  if (destroy_result != MV_OK)
+  {
+    ROS_WARN("MV_CC_DestroyHandle during release returned 0x%08x",
+             static_cast<unsigned int>(destroy_result));
+  }
+  dev_handle_ = nullptr;
+
+  {
+    std::unique_lock<std::mutex> lock(frame_callback_mutex_);
+    frame_callback_cv_.wait(lock, [this]() { return active_frame_callbacks_ == 0; });
+  }
+
+  ROS_INFO("Camera handle released: connected=%s, connection_check=%.3fs, stop=%.3fs, "
+           "callback_wait=%.3fs, close=%.3fs, destroy=%.3fs, total=%.3fs",
+           device_connected ? "true" : "false", connection_check_seconds, stop_seconds,
+           callback_wait_seconds, close_seconds, destroy_seconds,
+           (ros::WallTime::now() - release_start).toSec());
+}
+
 HKCameraNodelet::~HKCameraNodelet()
 {
   enable_trigger_timer_.stop();
@@ -677,46 +802,25 @@ HKCameraNodelet::~HKCameraNodelet()
     imu_trigger_client_.call(imu_trigger_srv);
   }
 
-  if (dev_handle_)
-  {
-    const int stop_result = MV_CC_StopGrabbing(dev_handle_);
-    if (stop_result != MV_OK)
-      ROS_WARN("MV_CC_StopGrabbing during shutdown returned 0x%08x", stop_result);
-    const int close_result = MV_CC_CloseDevice(dev_handle_);
-    if (close_result != MV_OK)
-      ROS_WARN("MV_CC_CloseDevice during shutdown returned 0x%08x", close_result);
-    const int destroy_result = MV_CC_DestroyHandle(dev_handle_);
-    if (destroy_result != MV_OK)
-      ROS_WARN("MV_CC_DestroyHandle during shutdown returned 0x%08x", destroy_result);
-    dev_handle_ = nullptr;
-  }
+  releaseCameraHandle();
+
+  pub_.shutdown();
+  pub_rect_.shutdown();
+  d_pub_.shutdown();
 
   delete[] img_;
   img_ = nullptr;
 }
 
-void* HKCameraNodelet::dev_handle_;
-unsigned char* HKCameraNodelet::img_;
-sensor_msgs::Image HKCameraNodelet::image_;
-sensor_msgs::Image HKCameraNodelet::image_rect;
-image_transport::CameraPublisher HKCameraNodelet::pub_;
-ros::Publisher HKCameraNodelet::pub_rect_;
-sensor_msgs::CameraInfo HKCameraNodelet::info_;
 int HKCameraNodelet::width_{};
 std::string HKCameraNodelet::imu_name_;
-std::string HKCameraNodelet::camera_name_;
 ros::ServiceClient HKCameraNodelet::imu_trigger_client_;
 bool HKCameraNodelet::enable_imu_trigger_;
 bool HKCameraNodelet::trigger_not_sync_ = false;
 const int HKCameraNodelet::FIFO_SIZE = 1023;
 int HKCameraNodelet::fifo_front_ = 0;
 int HKCameraNodelet::fifo_rear_ = 0;
-bool HKCameraNodelet::take_photo_{};
 struct TriggerPacket HKCameraNodelet::fifo_[FIFO_SIZE];
 uint32_t HKCameraNodelet::receive_trigger_counter_ = 0;
-bool HKCameraNodelet::enable_resolution_ = false;
-int HKCameraNodelet::resolution_ratio_width_ = 1440;
-int HKCameraNodelet::resolution_ratio_height_ = 1080;
-bool HKCameraNodelet::camera_restart_flag_{};
 
 }  // namespace hk_camera

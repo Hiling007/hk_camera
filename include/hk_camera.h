@@ -12,6 +12,7 @@
 #include <camera_info_manager/camera_info_manager.h>
 #include <ros/time.h>
 #include <sensor_msgs/TimeReference.h>
+#include <condition_variable>
 #include <string>
 #include <mutex>
 #include "libMVSapi/MvCameraControl.h"
@@ -45,11 +46,21 @@ public:
   ~HKCameraNodelet() override;
 
   void onInit() override;
-  static sensor_msgs::Image image_;
-  static sensor_msgs::Image image_rect;
+  sensor_msgs::Image image_;
+  sensor_msgs::Image image_rect;
   void timerCallback(const ros::TimerEvent&);
 
 private:
+  class FrameCallbackGuard
+  {
+  public:
+    explicit FrameCallbackGuard(HKCameraNodelet* camera);
+    ~FrameCallbackGuard();
+
+  private:
+    HKCameraNodelet* camera_;
+  };
+
   void reconfigCB(CameraConfig& config, uint32_t level);
   void triggerCB(const sensor_msgs::TimeReference::ConstPtr& time_ref);
   void enableTriggerCB(const ros::TimerEvent&);
@@ -57,19 +68,22 @@ private:
   void cameraStop(const std_msgs::Bool);
   void reset();
   void initializeCamera();
+  void releaseCameraHandle() noexcept;
+  bool beginFrameCallback();
+  void endFrameCallback() noexcept;
   bool changeStatusCB(rm_msgs::StatusChange::Request& change, rm_msgs::StatusChange::Response& res);
 
   ros::ServiceServer status_change_srv_;
 
   ros::NodeHandle nh_;
-  static void* dev_handle_;
+  void* dev_handle_{nullptr};
   static ros::ServiceClient imu_trigger_client_;
-  static bool camera_restart_flag_;
+  bool camera_restart_flag_{};
   dynamic_reconfigure::Server<CameraConfig>* srv_{};
 
   boost::shared_ptr<camera_info_manager::CameraInfoManager> info_manager_;
   ros::Timer timer_;
-  static std::string camera_name_;
+  std::string camera_name_;
   std::string camera_info_url_, pixel_format_, frame_id_, camera_sn_;
   double frame_rate_;
   int image_width_{}, image_height_{}, image_offset_x_{}, image_offset_y_{}, sleep_time_{};
@@ -87,15 +101,15 @@ private:
   int white_selector_{};
   bool stop_grab_{};
   static int width_;
-  static unsigned char* img_;
-  static image_transport::CameraPublisher pub_;
-  static ros::Publisher pub_rect_;
-  static sensor_msgs::CameraInfo info_;
+  unsigned char* img_{nullptr};
+  image_transport::CameraPublisher pub_;
+  ros::Publisher pub_rect_;
+  sensor_msgs::CameraInfo info_;
   static std::string imu_name_;
   static bool enable_imu_trigger_;
-  static bool enable_resolution_;
-  static int resolution_ratio_width_;
-  static int resolution_ratio_height_;
+  bool enable_resolution_{};
+  int resolution_ratio_width_{1440};
+  int resolution_ratio_height_{1080};
   static void fifoWrite(TriggerPacket pkt);
   static bool fifoRead(TriggerPacket& pkt);
   ros::Subscriber trigger_sub_;
@@ -107,7 +121,7 @@ private:
   static uint32_t receive_trigger_counter_;
   static int fifo_front_;
   static int fifo_rear_;
-  static bool take_photo_;
+  bool take_photo_{};
   ros::ServiceServer imu_correspondence_service_;
   static void __stdcall onFrameCB(unsigned char* pData, MV_FRAME_OUT_INFO_EX* pFrameInfo, void* pUser);
   ros::Subscriber camera_change_sub;
@@ -118,6 +132,10 @@ private:
   ros::WallTime next_pub_time_;
   bool is_fps_down_{};
   std::mutex fps_down_mutex_;
+  std::mutex frame_callback_mutex_;
+  std::condition_variable frame_callback_cv_;
+  std::size_t active_frame_callbacks_{};
+  bool accept_frame_callbacks_{};
   CameraConfig latest_config_;
 
   std::string node_name_;

@@ -51,6 +51,10 @@ if(CATKIN_ENABLE_TESTING)
             hk_camera_enum_failure_policy_test
             test/test_enum_failure_policy.cpp
     )
+    catkin_add_gtest(
+            hk_camera_release_policy_test
+            test/test_camera_release_policy.cpp
+    )
 endif()
 
 #add_executable(hk_camera_node
