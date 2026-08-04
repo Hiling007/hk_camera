@@ -12,6 +12,55 @@
 
 namespace hk_camera
 {
+namespace
+{
+template <std::size_t N>
+std::string serialNumberFromBytes(const unsigned char (&serial_number)[N])
+{
+  const char* begin = reinterpret_cast<const char*>(serial_number);
+  const char* end = std::find(begin, begin + N, '\0');
+  return std::string(begin, end);
+}
+
+std::string enumeratedDeviceSerialNumber(const MV_CC_DEVICE_INFO& device_info)
+{
+  if (device_info.nTLayerType == MV_USB_DEVICE)
+    return serialNumberFromBytes(device_info.SpecialInfo.stUsb3VInfo.chSerialNumber);
+  if (device_info.nTLayerType == MV_GIGE_DEVICE)
+    return serialNumberFromBytes(device_info.SpecialInfo.stGigEInfo.chSerialNumber);
+  return {};
+}
+
+bool releaseUncommittedHandle(void*& handle, bool device_open) noexcept
+{
+  if (!handle)
+    return true;
+
+  bool close_succeeded = true;
+  if (device_open)
+  {
+    const int close_result = MV_CC_CloseDevice(handle);
+    close_succeeded = close_result == MV_OK;
+    if (!close_succeeded)
+    {
+      ROS_WARN("MV_CC_CloseDevice for uncommitted camera handle returned 0x%08x",
+               static_cast<unsigned int>(close_result));
+    }
+  }
+
+  const int destroy_result = MV_CC_DestroyHandle(handle);
+  if (destroy_result != MV_OK)
+  {
+    ROS_ERROR("MV_CC_DestroyHandle for uncommitted camera handle returned 0x%08x",
+              static_cast<unsigned int>(destroy_result));
+    return false;
+  }
+
+  handle = nullptr;
+  return close_succeeded;
+}
+}  // namespace
+
 PLUGINLIB_EXPORT_CLASS(hk_camera::HKCameraNodelet, nodelet::Nodelet)
 HKCameraNodelet::HKCameraNodelet() = default;
 
@@ -182,31 +231,95 @@ void HKCameraNodelet::initializeCamera()
       ROS_ERROR("Multiple cameras found, but camera_sn is empty.");
       throw std::runtime_error("camera_sn is required when multiple cameras are connected");
     }
+    MV_CC_DEVICE_INFO* selected_device_info = nullptr;
     for (; nIndex < stDeviceList.nDeviceNum; nIndex++)
     {
-      // ROS_WARN("creating handle");
-      CHECK_MVS(MV_CC_CreateHandle(&dev_handle_, stDeviceList.pDeviceInfo[nIndex]));
-      MV_CC_OpenDevice(dev_handle_);
-      MV_CC_GetStringValue(dev_handle_, "DeviceSerialNumber", &dev_sn);
-      if (strcmp(dev_sn.chCurValue, (char*)camera_sn_.data()) == 0)
+      MV_CC_DEVICE_INFO* candidate_info = stDeviceList.pDeviceInfo[nIndex];
+      if (!candidate_info)
       {
-        ROS_WARN("find target: %s", dev_sn.chCurValue);
-        break;
+        ROS_WARN("Ignoring null camera device information at index %u", nIndex);
+        continue;
       }
-      else
-      {
-        MV_CC_DestroyHandle(dev_handle_);
-        dev_handle_ = nullptr;
-        ROS_WARN("wrong target: %s", dev_sn.chCurValue);
 
-        //If all device not match, drop.
-        if (nIndex == stDeviceList.nDeviceNum - 1)
-        {
-          ROS_ERROR("Serial number not match!");
-          throw std::runtime_error("Serial number not match!");
-        }
+      const std::string candidate_sn = enumeratedDeviceSerialNumber(*candidate_info);
+      if (candidate_sn.empty())
+      {
+        ROS_WARN("Unable to read enumerated camera serial number at index %u", nIndex);
+        continue;
       }
+
+      if (candidate_sn != camera_sn_)
+      {
+        ROS_WARN("wrong target: %s", candidate_sn.c_str());
+        continue;
+      }
+
+      selected_device_info = candidate_info;
+      break;
     }
+
+    if (!selected_device_info)
+    {
+      ROS_ERROR("Serial number not match!");
+      throw std::runtime_error("Serial number not match!");
+    }
+
+    //对句柄进行局部测试，出现问题则杀节点
+    void* candidate_handle = nullptr;
+    bool candidate_open = false;
+    auto release_candidate = [this, &candidate_handle, &candidate_open]() {
+      const bool release_succeeded = releaseUncommittedHandle(candidate_handle, candidate_open);
+      if (candidate_handle)
+      {
+        dev_handle_ = candidate_handle;
+        candidate_handle = nullptr;
+        ROS_ERROR("Retaining camera handle so shutdown can retry its destruction");
+      }
+      candidate_open = false;
+      return release_succeeded;
+    };
+
+    const int create_result = MV_CC_CreateHandle(&candidate_handle, selected_device_info);
+    if (create_result != MV_OK)
+    {
+      ROS_ERROR("MV_CC_CreateHandle for camera %s failed with 0x%08x", camera_sn_.c_str(),
+                static_cast<unsigned int>(create_result));
+      if (candidate_handle)
+        release_candidate();
+      throw std::runtime_error("MV_CC_CreateHandle failed while selecting camera");
+    }
+
+    const int open_result = MV_CC_OpenDevice(candidate_handle);
+    if (open_result != MV_OK)
+    {
+      ROS_ERROR("MV_CC_OpenDevice for camera %s failed with 0x%08x", camera_sn_.c_str(),
+                static_cast<unsigned int>(open_result));
+      release_candidate();
+      throw std::runtime_error("MV_CC_OpenDevice failed while selecting camera");
+    }
+    candidate_open = true;
+
+    memset(&dev_sn, 0, sizeof(MVCC_STRINGVALUE));
+    const int serial_result = MV_CC_GetStringValue(candidate_handle, "DeviceSerialNumber", &dev_sn);
+    if (serial_result != MV_OK)
+    {
+      ROS_ERROR("MV_CC_GetStringValue for camera %s failed with 0x%08x", camera_sn_.c_str(),
+                static_cast<unsigned int>(serial_result));
+      release_candidate();
+      throw std::runtime_error("Failed to read selected camera serial number");
+    }
+
+    if (camera_sn_ != dev_sn.chCurValue)
+    {
+      ROS_ERROR("Selected camera serial number changed from %s to %s", camera_sn_.c_str(), dev_sn.chCurValue);
+      release_candidate();
+      throw std::runtime_error("Selected camera serial number changed");
+    }
+
+    dev_handle_ = candidate_handle;
+    candidate_handle = nullptr;
+    candidate_open = false;
+    ROS_WARN("find target: %s", dev_sn.chCurValue);
   }
   else
   {
