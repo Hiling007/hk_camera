@@ -1,0 +1,22 @@
+image_width: 1280
+image_height: 1024
+pixel_format: bgr8
+camera_info_url: 'file:///home/dynamicx/.ros/camera_info/camera_back.yaml'
+camera_name: hk_camera_back
+camera_frame_id: camera_optical_frame_back
+frame_id: camera_optical_frame_back
+camera_sn: DA5510091
+#如果相机类型是ca016，camera_sn前要加00
+frame_rate: 30
+exposure_auto: false
+exposure_value: 1000
+
+gamma_selector: 2
+gamma_value: 0.7
+enable_imu_trigger: false
+gain_auto: false
+gain_value: 16
+sleep_time: 3
+stop_grab: false
+is_fps_down: false
+target_fps: 15

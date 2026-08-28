@@ -16,5 +16,7 @@ gamma_value: 0.5
 enable_imu_trigger: false
 gain_auto: false
 gain_value: 16
+
+
 is_fps_down: false
 target_fps: 15.0

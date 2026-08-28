@@ -302,7 +302,6 @@ void HKCameraNodelet::timerCallback(const ros::TimerEvent&) {
     std::cout<<"searching target:"<<camera_sn_<<std::endl;
     for (unsigned int i = 0;i< stDeviceList.nDeviceNum; i++)
     {
-      ROS_INFO("device:%d\n",stDeviceList.nDeviceNum);
       if (stDeviceList.pDeviceInfo[i] == nullptr) {
         ROS_INFO("no device.");
         break;
