@@ -169,13 +169,13 @@ void HKCameraNodelet::initializeCamera()
       MV_CC_GetStringValue(dev_handle_, "DeviceSerialNumber", &dev_sn);
       if (strcmp(dev_sn.chCurValue, (char*)camera_sn_.data()) == 0)
       {
-        ROS_WARN("find target: %s", dev_sn.chCurValue);
+        ROS_INFO("find target: %s", dev_sn.chCurValue);
         break;
       }
       else
       {
         MV_CC_DestroyHandle(dev_handle_);
-        ROS_WARN("wrong target: %s", dev_sn.chCurValue);
+        ROS_INFO("wrong target: %s", dev_sn.chCurValue);
 
         //If all device not match, drop.
         if (nIndex == stDeviceList.nDeviceNum - 1)
@@ -277,6 +277,10 @@ void HKCameraNodelet::initializeCamera()
   {
     ROS_INFO("Stream On.");
   }
+  if (is_fps_down_) {
+    ROS_WARN("FPS_down mode enabled, check raw_FPS. Target fps: %f", target_fps_);
+  }
+
 }
 
 void HKCameraNodelet::timerCallback(const ros::TimerEvent&) {
@@ -535,7 +539,7 @@ void HKCameraNodelet::onFrameCB(unsigned char* pData, MV_FRAME_OUT_INFO_EX* pFra
 
 void HKCameraNodelet::reconfigCB(CameraConfig& config, uint32_t level)
 {
-  ROS_WARN("Reconfigure.");
+  ROS_INFO("Reconfigure.");
   (void)level;
 
   // Launch setting
